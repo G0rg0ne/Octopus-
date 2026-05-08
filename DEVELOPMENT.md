@@ -82,3 +82,22 @@ Provide a thin, async HTTP gateway in front of vLLM for practical production con
 ### Next Steps
 - Optionally disable `/v1/chat/completions` proxy if your chosen vLLM server build doesn't enable it.
 - Add automated tests for auth, health, and streaming behavior.
+
+## [2026-05-08 23:36] - BUGFIX
+
+### Changes
+- Fixed the Compose `vllm` service `command` to match the image entrypoint behavior (this image uses `ENTRYPOINT ["vllm","serve"]`), so Compose now passes only `<model> ...` arguments (no leading `vllm` or `serve`).
+
+### Files Modified
+- `docker-compose.yml`
+- `README.md`
+- `DEVELOPMENT.md`
+
+### Rationale
+This image already runs `vllm serve` via its entrypoint. Including `serve` again in `command:` resulted in `vllm serve serve <model> ...`, which caused `vllm: error: unrecognized arguments: <model>`.
+
+### Breaking Changes
+None
+
+### Next Steps
+- Rebuild and restart the `vllm` service, then confirm `curl http://localhost:8000/v1/models` returns JSON.

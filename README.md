@@ -47,6 +47,9 @@ This brings up:
 - **Gateway**: `http://localhost:8080`
 - **vLLM (direct)**: `http://localhost:8000`
 
+Notes:
+- The vLLM image in this repo inherits an entrypoint of `vllm serve`, so Compose passes `command:` as `<model> ...` (do not prefix the command with `vllm` or `serve`).
+
 ### Option B: Docker CLI
 
 ```bash
