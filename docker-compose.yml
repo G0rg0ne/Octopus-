@@ -13,7 +13,7 @@ services:
       - --port
       - "8000"
       - --gpu-memory-utilization
-      - "0.90"
+      - "0.80"
       - --max-model-len
       - "2048"
       - --max-num-seqs
@@ -24,6 +24,8 @@ services:
       HF_HOME: /data/hf
       HUGGINGFACE_HUB_CACHE: /data/hf/hub
       TRANSFORMERS_CACHE: /data/hf/transformers
+    env_file:
+      - .env
     volumes:
       - hf-cache:/data/hf
     deploy:
@@ -33,6 +35,21 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  api:
+    build:
+      context: ./backend
+    image: octopus-api-gateway:dev
+    depends_on:
+      - vllm
+    ports:
+      - "8080:8080"
+    environment:
+      VLLM_BASE_URL: "http://vllm:8000"
+      API_KEY: "${API_KEY:-dev-key}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    env_file:
+      - .env
 
 volumes:
   hf-cache:

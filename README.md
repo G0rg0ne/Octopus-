@@ -1,6 +1,8 @@
-# vLLM Docker Serve (Qwen2.5-0.5B)
+# vLLM Docker Serve + FastAPI Gateway (Qwen2.5-0.5B)
 
-This repo provides a **Dockerized vLLM OpenAI-compatible server** for a small model: **`Qwen/Qwen2.5-0.5B-Instruct`**.
+This repo provides:
+- a **Dockerized vLLM OpenAI-compatible server** for a small model: **`Qwen/Qwen2.5-0.5B-Instruct`**, and
+- a **FastAPI gateway** that wraps vLLM with **API-key auth**, **request logging (structlog)**, **SSE streaming**, **input validation**, and a **`/health`** route.
 
 It focuses on:
 - Serving with `vllm serve`
@@ -11,10 +13,14 @@ It focuses on:
 - **Docker Desktop** (Windows)
 - **NVIDIA GPU** + NVIDIA drivers + WSL2 integration
 - **vLLM OpenAI server image**: `vllm/vllm-openai` (base image)
+- **FastAPI** + **uvicorn**
+- **httpx** (async proxy)
+- **structlog** (JSON request logs)
 
 ## Project structure
 - `Dockerfile`: builds the serving image (runtime downloads model weights)
 - `docker-compose.yml`: optional Compose setup with GPU + persistent Hugging Face cache volume
+- `backend/`: FastAPI gateway service (sidecar container)
 - `scripts/run_vllm.ps1`: build + run (Windows PowerShell)
 - `scripts/run_vllm.sh`: build + run (bash)
 - `.env.example`: optional environment variables (no secrets)
@@ -37,7 +43,9 @@ If `docker build` fails with a message about `dockerDesktopLinuxEngine` not foun
 docker compose up --build
 ```
 
-This exposes the server at `http://localhost:8000`.
+This brings up:
+- **Gateway**: `http://localhost:8080`
+- **vLLM (direct)**: `http://localhost:8000`
 
 ### Option B: Docker CLI
 
@@ -58,6 +66,60 @@ Notes:
 - You can override defaults via env vars (see `.env.example`).
 
 ## API usage
+
+### Gateway auth
+All gateway routes require:
+- `X-API-Key: <key>`
+
+Set `API_KEY` in your environment (see `.env.example`).
+
+### Gateway health
+
+```bash
+curl -H "X-API-Key: dev-key" http://localhost:8080/health
+```
+
+### Gateway: list available models (proxied)
+
+```bash
+curl -H "X-API-Key: dev-key" http://localhost:8080/v1/models
+```
+
+### Gateway: OpenAI-compatible Completions API (proxied)
+
+```bash
+curl -s http://localhost:8080/v1/completions ^
+  -H "X-API-Key: dev-key" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Write a haiku about GPUs.\",\"max_tokens\":64,\"temperature\":0.7}"
+```
+
+### Gateway: OpenAI-compatible streaming (SSE passthrough)
+
+```bash
+curl -N http://localhost:8080/v1/completions ^
+  -H "X-API-Key: dev-key" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64,\"temperature\":0.7,\"stream\":true}"
+```
+
+### Gateway: custom generate (validated)
+
+```bash
+curl -s http://localhost:8080/api/v1/generate ^
+  -H "X-API-Key: dev-key" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Say hello.\",\"max_tokens\":32}"
+```
+
+### Gateway: custom stream (normalized SSE)
+
+```bash
+curl -N http://localhost:8080/api/v1/stream ^
+  -H "X-API-Key: dev-key" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64}"
+```
 
 ### List available models
 
@@ -109,5 +171,10 @@ If you see OOM errors, reduce `VLLM_GPU_MEMORY_UTILIZATION`, `VLLM_MAX_MODEL_LEN
 4. `curl -X POST http://localhost:8000/v1/completions ...` returns a completion.
 
 ## Deployment notes
-- For production, pin the base image tag instead of `latest`, and consider configuring:\n+  - restart policies\n+  - request limits (`--max-model-len`, `--max-num-seqs`)\n+  - auth (reverse proxy in front of the OpenAI-compatible server)\n+
-## Recent changes\n+See `DEVELOPMENT.md`.\n
+- For production, pin the base image tag instead of `latest`, and consider configuring:
+  - restart policies
+  - request limits (`--max-model-len`, `--max-num-seqs`)
+  - auth (reverse proxy in front of the OpenAI-compatible server, or use the gateway)
+
+## Recent changes
+See `DEVELOPMENT.md`.
