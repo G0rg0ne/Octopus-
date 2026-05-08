@@ -1,5 +1,65 @@
 # Development Log
 
+## [2026-05-09 15:45] - DOCS
+
+### Changes
+- Standardized `README.md` on **bash**: `\` line continuations everywhere, `export GATEWAY` / `VLLM` / `API_KEY` session setup, and all gateway or direct `curl` examples using those variables.
+- Replaced Windows CMD `^` continuations (including Docker CLI `docker run` example) with bash syntax.
+- Expanded direct vLLM section with **streaming** completions and **chat** completions (non-stream + stream) examples; aligned gateway chat examples with subheadings.
+- Updated testing checklist to use the same bash exports and variable-based curls.
+
+### Files Modified
+- `README.md`
+- `DEVELOPMENT.md`
+
+### Rationale
+Examples should paste cleanly into Git Bash, WSL, and Linux terminals without shell-specific continuations.
+
+### Breaking Changes
+None
+
+### Next Steps
+None
+
+## [2026-05-09 14:30] - DOCS
+
+### Changes
+- Documented that README multi-line `curl` examples use **`^`** for **cmd.exe** only; Git Bash/WSL/bash must use **`\`** or a one-line command. Explained how mis-pasted `^` leads to missing headers and `Invalid or missing API key`, plus `Could not resolve host: ^` / `-H: command not found`.
+- Added a shell continuation table and a cross-shell one-line streaming `curl` example.
+
+### Files Modified
+- `README.md`
+- `DEVELOPMENT.md`
+
+### Rationale
+Users running examples from Git Bash hit confusing errors; clarify shell-specific line endings.
+
+### Breaking Changes
+None
+
+### Next Steps
+None
+
+## [2026-05-09 12:00] - DOCS
+
+### Changes
+- Expanded `README.md` API section into a full endpoint reference: gateway vs direct vLLM, auth notes (including optional health key), and per-route descriptions with example `curl` commands for health, models, completions, chat completions (non-stream and SSE), `/api/v1/generate`, and `/api/v1/stream`.
+- Clarified that OpenAI-compatible completion routes are **POST** only and noted **405** on **GET**.
+- Extended the testing checklist with gateway smoke checks.
+
+### Files Modified
+- `README.md`
+- `DEVELOPMENT.md`
+
+### Rationale
+Make every exposed route easy to discover with a one-line purpose and a copy-paste example.
+
+### Breaking Changes
+None
+
+### Next Steps
+None
+
 ## [2026-05-08 20:55] - FEATURE
 
 ### Changes

@@ -55,12 +55,12 @@ Notes:
 ```bash
 docker build -t octopus-vllm:qwen0.5b .
 
-docker run --rm -it --gpus all -p 8000:8000 ^
-  -e HF_HOME=/data/hf ^
-  -e HUGGINGFACE_HUB_CACHE=/data/hf/hub ^
-  -e TRANSFORMERS_CACHE=/data/hf/transformers ^
-  -v hf-cache:/data/hf ^
-  octopus-vllm:qwen0.5b ^
+docker run --rm -it --gpus all -p 8000:8000 \
+  -e HF_HOME=/data/hf \
+  -e HUGGINGFACE_HUB_CACHE=/data/hf/hub \
+  -e TRANSFORMERS_CACHE=/data/hf/transformers \
+  -v hf-cache:/data/hf \
+  octopus-vllm:qwen0.5b \
   serve Qwen/Qwen2.5-0.5B-Instruct --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.90 --max-model-len 2048 --max-num-seqs 32
 ```
 
@@ -68,77 +68,180 @@ Notes:
 - The first run will download weights into the mounted cache volume `hf-cache` and will be slower.
 - You can override defaults via env vars (see `.env.example`).
 
-## API usage
+## API reference
 
-### Gateway auth
-All gateway routes require:
-- `X-API-Key: <key>`
+Two HTTP fronts:
 
-Set `API_KEY` in your environment (see `.env.example`).
+| Base URL | Role |
+|----------|------|
+| `http://localhost:8080` | **Gateway** (Compose): API-key auth on most routes, proxies to vLLM |
+| `http://localhost:8000` | **vLLM** directly: same OpenAI-compatible paths, no gateway auth |
 
-### Gateway health
+Replace hosts/ports if you run services differently.
+
+### Bash session setup
+
+All gateway examples below use these variables. Defaults match `docker compose` (`API_KEY` / `dev-key`). Change them if your gateway URL or API key differs.
 
 ```bash
-curl -H "X-API-Key: dev-key" http://localhost:8080/health
+export GATEWAY=http://localhost:8080
+export VLLM=http://localhost:8000
+export API_KEY=dev-key
 ```
 
-### Gateway: list available models (proxied)
+Multi-line commands use **`\`** at the end of each line (bash / Git Bash / WSL). Each snippet is valid bash when pasted after the exports.
+
+### Gateway authentication
+
+Most gateway routes require:
+
+- Header: `X-API-Key: <key>` (must match `API_KEY`, default `dev-key` in Compose).
+
+Exceptions:
+
+- **`GET /health`** does not require a key unless you set `REQUIRE_API_KEY_ON_HEALTH=true`.
+
+OpenAI-compatible completion routes accept **`POST` only** (a **`GET`** returns **405**).
+
+---
+
+### Gateway (`$GATEWAY`)
+
+Requires [session setup](#bash-session-setup). Uses `$API_KEY` for protected routes.
+
+#### `GET /health`
+
+Checks gateway availability and whether vLLM responds by requesting upstream `GET /v1/models`. Returns JSON with `status` and upstream latency. No API key unless `REQUIRE_API_KEY_ON_HEALTH=true`.
 
 ```bash
-curl -H "X-API-Key: dev-key" http://localhost:8080/v1/models
+curl -s "${GATEWAY}/health"
 ```
 
-### Gateway: OpenAI-compatible Completions API (proxied)
+#### `GET /v1/models`
+
+Lists models from vLLM (proxied JSON). Same shape as the OpenAI-compatible models listing.
 
 ```bash
-curl -s http://localhost:8080/v1/completions ^
-  -H "X-API-Key: dev-key" ^
-  -H "Content-Type: application/json" ^
+curl -s \
+  -H "X-API-Key: ${API_KEY}" \
+  "${GATEWAY}/v1/models"
+```
+
+#### `POST /v1/completions`
+
+OpenAI-compatible **text completions**. Body must be **`Content-Type: application/json`**. Non-streaming: omit `stream` or set `"stream": false`; response is one JSON object when generation finishes.
+
+```bash
+curl -s -X POST "${GATEWAY}/v1/completions" \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
   -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Write a haiku about GPUs.\",\"max_tokens\":64,\"temperature\":0.7}"
 ```
 
-### Gateway: OpenAI-compatible streaming (SSE passthrough)
+Streaming: set `"stream": true`; gateway returns **SSE** (`text/event-stream`) passthrough from vLLM. Use `curl -N` so chunks arrive as they are generated.
 
 ```bash
-curl -N http://localhost:8080/v1/completions ^
-  -H "X-API-Key: dev-key" ^
-  -H "Content-Type: application/json" ^
+curl -N -X POST "${GATEWAY}/v1/completions" \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
   -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64,\"temperature\":0.7,\"stream\":true}"
 ```
 
-### Gateway: custom generate (validated)
+#### `POST /v1/chat/completions`
+
+OpenAI-compatible **chat** API (`messages` array). Proxied like completions; use `"stream": true` for SSE streaming.
+
+Non-streaming:
 
 ```bash
-curl -s http://localhost:8080/api/v1/generate ^
-  -H "X-API-Key: dev-key" ^
-  -H "Content-Type: application/json" ^
+curl -s -X POST "${GATEWAY}/v1/chat/completions" \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"max_tokens\":64}"
+```
+
+Streaming:
+
+```bash
+curl -N -X POST "${GATEWAY}/v1/chat/completions" \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Count to three slowly.\"}],\"max_tokens\":64,\"stream\":true}"
+```
+
+#### `POST /api/v1/generate`
+
+Gateway-native endpoint: **validated** request body (Pydantic), calls upstream completions **non-streaming**, returns a **normalized** JSON body (`text`, `finish_reason`, `usage`, etc.) instead of raw OpenAI shapes.
+
+```bash
+curl -s -X POST "${GATEWAY}/api/v1/generate" \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
   -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Say hello.\",\"max_tokens\":32}"
 ```
 
-### Gateway: custom stream (normalized SSE)
+#### `POST /api/v1/stream`
+
+Same validated input as `/api/v1/generate`, but streams **normalized SSE**: `event: token` lines with JSON `{"text":"..."}`, then `event: done`. Easier to consume than raw OpenAI SSE if you only need incremental text.
 
 ```bash
-curl -N http://localhost:8080/api/v1/stream ^
-  -H "X-API-Key: dev-key" ^
-  -H "Content-Type: application/json" ^
+curl -N -X POST "${GATEWAY}/api/v1/stream" \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
   -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64}"
 ```
 
-### List available models
+---
+
+### Direct vLLM (`$VLLM`)
+
+Requires [session setup](#bash-session-setup) for `$VLLM` (no API key on these routes). Same OpenAI-style paths as upstream vLLM.
+
+#### `GET /v1/models`
 
 ```bash
-curl http://localhost:8000/v1/models
+curl -s "${VLLM}/v1/models"
 ```
 
-### OpenAI-compatible Completions API (`/v1/completions`)
+#### `POST /v1/completions`
+
+Non-streaming:
 
 ```bash
-curl -s http://localhost:8000/v1/completions ^
-  -H "Content-Type: application/json" ^
+curl -s -X POST "${VLLM}/v1/completions" \
+  -H "Content-Type: application/json" \
   -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Write a haiku about GPUs.\",\"max_tokens\":64,\"temperature\":0.7}"
 ```
 
-If you prefer, you can also call it with the OpenAI Python client by pointing `base_url` to `http://localhost:8000/v1`.
+Streaming (`stream: true`, OpenAI SSE):
+
+```bash
+curl -N -X POST "${VLLM}/v1/completions" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64,\"temperature\":0.7,\"stream\":true}"
+```
+
+#### `POST /v1/chat/completions`
+
+Available when your vLLM build exposes chat completions.
+
+Non-streaming:
+
+```bash
+curl -s -X POST "${VLLM}/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"max_tokens\":64}"
+```
+
+Streaming:
+
+```bash
+curl -N -X POST "${VLLM}/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Count to three slowly.\"}],\"max_tokens\":64,\"stream\":true}"
+```
+
+You can use the official OpenAI Python client with `base_url` set to `http://localhost:8000/v1` (direct) or `http://localhost:8080/v1` (gateway; add default header `X-API-Key`).
 
 ## Concepts (what you’ll see in logs)
 
@@ -168,10 +271,19 @@ If you see OOM errors, reduce `VLLM_GPU_MEMORY_UTILIZATION`, `VLLM_MAX_MODEL_LEN
 - You can also override serving parameters by editing the `docker run` arguments or the `docker-compose.yml` `command:`.
 
 ## Testing / verification checklist
+
+After `docker compose up --build`, in bash:
+
+```bash
+export GATEWAY=http://localhost:8080 VLLM=http://localhost:8000 API_KEY=dev-key
+```
+
 1. `docker version` shows a working server.
-2. Start the container via Compose or Docker CLI.
-3. `curl http://localhost:8000/v1/models` returns JSON.
-4. `curl -X POST http://localhost:8000/v1/completions ...` returns a completion.
+2. Compose (or Docker CLI) has started vLLM and the gateway.
+3. `curl -s "${VLLM}/v1/models"` returns JSON.
+4. `curl -s -X POST "${VLLM}/v1/completions" -H "Content-Type: application/json" -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Hi\",\"max_tokens\":8}"` returns a completion.
+5. `curl -s "${GATEWAY}/health"` returns `"status":"ok"` when vLLM is ready.
+6. `curl -s -H "X-API-Key: ${API_KEY}" "${GATEWAY}/v1/models"` returns JSON.
 
 ## Deployment notes
 - For production, pin the base image tag instead of `latest`, and consider configuring:
