@@ -1,0 +1,38 @@
+services:
+  vllm:
+    build:
+      context: .
+    image: octopus-vllm:qwen0.5b
+    ports:
+      - "8000:8000"
+    command:
+      - serve
+      - "Qwen/Qwen2.5-0.5B-Instruct"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --max-model-len
+      - "2048"
+      - --max-num-seqs
+      - "32"
+    environment:
+      # Optional. Needed only for gated models.
+      # HF_TOKEN: "${HF_TOKEN}"
+      HF_HOME: /data/hf
+      HUGGINGFACE_HUB_CACHE: /data/hf/hub
+      TRANSFORMERS_CACHE: /data/hf/transformers
+    volumes:
+      - hf-cache:/data/hf
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
