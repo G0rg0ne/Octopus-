@@ -1,5 +1,28 @@
 # Development Log
 
+## [2026-05-09 15:56] - CONFIG
+
+### Changes
+- Tuned vLLM Compose defaults to reduce CUDA OOM risk by lowering `--gpu-memory-utilization`, `--max-model-len`, and `--max-num-seqs`.
+- Made vLLM serving parameters configurable via `.env` with sane defaults and added `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to reduce allocator fragmentation.
+- Added `.env.example` documenting supported environment variables (no secrets).
+- Updated `README.md` to reflect the new defaults and document the additional vLLM env knobs.
+
+### Files Modified
+- `docker-compose.yml`
+- `.env.example`
+- `README.md`
+- `DEVELOPMENT.md`
+
+### Rationale
+vLLM allocates KV cache during engine initialization based on concurrency and context limits; the previous defaults could exceed available VRAM on 12GB GPUs or when the GPU is already partially in use. Making these knobs configurable improves reliability across different GPUs.
+
+### Breaking Changes
+None (defaults changed only; you can restore prior settings via `.env`).
+
+### Next Steps
+- If you still see OOM, reduce `VLLM_MAX_NUM_SEQS` further (e.g. 4) and/or `VLLM_MAX_MODEL_LEN` (e.g. 512), and ensure nothing else is using the GPU.
+
 ## [2026-05-09 15:45] - DOCS
 
 ### Changes

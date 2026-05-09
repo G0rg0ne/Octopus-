@@ -59,9 +59,10 @@ docker run --rm -it --gpus all -p 8000:8000 \
   -e HF_HOME=/data/hf \
   -e HUGGINGFACE_HUB_CACHE=/data/hf/hub \
   -e TRANSFORMERS_CACHE=/data/hf/transformers \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   -v hf-cache:/data/hf \
   octopus-vllm:qwen0.5b \
-  serve Qwen/Qwen2.5-0.5B-Instruct --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.90 --max-model-len 2048 --max-num-seqs 32
+  serve Qwen/Qwen2.5-0.5B-Instruct --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.55 --max-model-len 1024 --max-num-seqs 8
 ```
 
 Notes:
@@ -268,6 +269,11 @@ If you see OOM errors, reduce `VLLM_GPU_MEMORY_UTILIZATION`, `VLLM_MAX_MODEL_LEN
 
 ## Environment variables
 - `HF_TOKEN` (optional): only required for gated Hugging Face models.
+- vLLM serving knobs (Compose defaults are in `.env.example`):
+  - `VLLM_GPU_MEMORY_UTILIZATION`
+  - `VLLM_MAX_MODEL_LEN`
+  - `VLLM_MAX_NUM_SEQS`
+  - `PYTORCH_CUDA_ALLOC_CONF` (recommended: `expandable_segments:True`)
 - You can also override serving parameters by editing the `docker run` arguments or the `docker-compose.yml` `command:`.
 
 ## Testing / verification checklist

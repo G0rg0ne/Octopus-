@@ -4,25 +4,26 @@ services:
       context: .
     image: octopus-vllm:qwen0.5b
     ports:
-      - "8000:8000"
+      - "8000"
     command:
-      - "Qwen/Qwen2.5-0.5B-Instruct"
+      - "${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
       - --host
       - "0.0.0.0"
       - --port
       - "8000"
       - --gpu-memory-utilization
-      - "0.80"
+      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.55}"
       - --max-model-len
-      - "2048"
+      - "${VLLM_MAX_MODEL_LEN:-1024}"
       - --max-num-seqs
-      - "32"
+      - "${VLLM_MAX_NUM_SEQS:-8}"
     environment:
-      # Optional. Needed only for gated models.
-      # HF_TOKEN: "${HF_TOKEN}"
+      HF_TOKEN: "${HF_TOKEN}"
       HF_HOME: /data/hf
       HUGGINGFACE_HUB_CACHE: /data/hf/hub
       TRANSFORMERS_CACHE: /data/hf/transformers
+      # Helps reduce CUDA allocator fragmentation (common on long-running servers).
+      PYTORCH_CUDA_ALLOC_CONF: "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
     env_file:
       - .env
     volumes:
