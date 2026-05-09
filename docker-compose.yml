@@ -4,7 +4,7 @@ services:
       context: .
     image: octopus-vllm:qwen0.5b
     ports:
-      - "8000"
+      - "8000:8000"
     command:
       - "${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
       - --host
@@ -17,6 +17,11 @@ services:
       - "${VLLM_MAX_MODEL_LEN:-1024}"
       - --max-num-seqs
       - "${VLLM_MAX_NUM_SEQS:-8}"
+      - --tensor-parallel-size
+      - "${VLLM_TENSOR_PARALLEL_SIZE:-1}"
+      - --kv-cache-metrics
+      - --kv-cache-metrics-sample
+      - "${VLLM_KV_CACHE_METRICS_SAMPLE:-0.01}"
     environment:
       HF_TOKEN: "${HF_TOKEN}"
       HF_HOME: /data/hf
@@ -51,5 +56,31 @@ services:
     env_file:
       - .env
 
+  prometheus:
+    image: prom/prometheus:latest
+    depends_on:
+      - vllm
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+
 volumes:
   hf-cache:
+  grafana-data:
