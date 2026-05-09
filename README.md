@@ -46,9 +46,23 @@ docker compose up --build
 This brings up:
 - **Gateway**: `http://localhost:8080`
 - **vLLM (direct)**: `http://localhost:8000`
+- **Prometheus**: `http://localhost:9090`
+- **Grafana**: `http://localhost:3000` (default credentials: `admin` / `admin`)
 
 Notes:
 - The vLLM image in this repo inherits an entrypoint of `vllm serve`, so Compose passes `command:` as `<model> ...` (do not prefix the command with `vllm` or `serve`).
+
+## Observability (Prometheus + Grafana)
+
+This repo includes an optional local observability stack:
+
+- **Prometheus** scrapes vLLM metrics from `http://vllm:8000/metrics` (Compose service `prometheus`).
+- **Grafana** is pre-provisioned with a vLLM dashboard JSON at `observability/grafana/dashboards/vllm_latency_throughput.json`.
+
+If a Grafana panel shows **No data**, double-check the metric name exists in `/metrics`. vLLM exports counters like:
+- `vllm:request_success_total`
+- `vllm:prompt_tokens_total`
+- `vllm:generation_tokens_total`
 
 ### Option B: Docker CLI
 

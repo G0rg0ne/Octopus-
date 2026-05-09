@@ -1,5 +1,24 @@
 # Development Log
 
+## [2026-05-09 15:38] - BUGFIX
+
+### Changes
+- Fixed Grafana dashboard PromQL to use vLLM’s exported counter names (`*_total`) so panels like **Requests / sec** and token throughput populate.
+- Updated `README.md` with an Observability section describing the Prometheus + Grafana stack and the dashboard location.
+
+### Files Modified
+- `observability/grafana/dashboards/vllm_latency_throughput.json`
+- `README.md`
+
+### Rationale
+The vLLM `/metrics` endpoint exports counters such as `vllm:request_success_total`, but the dashboard referenced non-existent series names (without the `_total` suffix), resulting in “No data” despite successful scrapes.
+
+### Breaking Changes
+None
+
+### Next Steps
+- Consider adjusting KV cache panels to use `max_over_time(vllm:kv_cache_usage_perc[5m])` if you want to visualize peaks rather than instantaneous values.
+
 ## [2026-05-09 15:56] - CONFIG
 
 ### Changes

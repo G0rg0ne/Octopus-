@@ -12,16 +12,16 @@ services:
       - --port
       - "8000"
       - --gpu-memory-utilization
-      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.55}"
+      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.6}"
       - --max-model-len
-      - "${VLLM_MAX_MODEL_LEN:-1024}"
+      - "${VLLM_MAX_MODEL_LEN:-2048}"
       - --max-num-seqs
       - "${VLLM_MAX_NUM_SEQS:-8}"
       - --tensor-parallel-size
       - "${VLLM_TENSOR_PARALLEL_SIZE:-1}"
       - --kv-cache-metrics
       - --kv-cache-metrics-sample
-      - "${VLLM_KV_CACHE_METRICS_SAMPLE:-0.01}"
+      - "${VLLM_KV_CACHE_METRICS_SAMPLE:-0.7}"
     environment:
       HF_TOKEN: "${HF_TOKEN}"
       HF_HOME: /data/hf

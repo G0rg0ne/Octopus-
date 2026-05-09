@@ -15,7 +15,7 @@
         "datasource": { "type": "prometheus", "uid": "Prometheus" },
         "refresh": 1,
         "query": {
-          "query": "label_values(vllm:request_success, model_name)"
+          "query": "label_values(vllm:request_success_total, model_name)"
         },
         "includeAll": true,
         "allValue": ".*",
@@ -46,7 +46,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum(rate(vllm:request_success{model_name=~\"$model_name\"}[1m]))",
+          "expr": "sum(rate(vllm:request_success_total{model_name=~\"$model_name\"}[1m]))",
           "legendFormat": "rps"
         }
       ],
@@ -65,7 +65,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum(rate(vllm:generation_tokens{model_name=~\"$model_name\"}[1m]))",
+          "expr": "sum(rate(vllm:generation_tokens_total{model_name=~\"$model_name\"}[1m]))",
           "legendFormat": "toks/s"
         }
       ],
@@ -172,13 +172,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum(rate(vllm:prompt_tokens{model_name=~\"$model_name\"}[1m]))",
+          "expr": "sum(rate(vllm:prompt_tokens_total{model_name=~\"$model_name\"}[1m]))",
           "legendFormat": "prompt_toks/s"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "sum(rate(vllm:generation_tokens{model_name=~\"$model_name\"}[1m]))",
+          "expr": "sum(rate(vllm:generation_tokens_total{model_name=~\"$model_name\"}[1m]))",
           "legendFormat": "generation_toks/s"
         }
       ],
