@@ -1,5 +1,29 @@
 # Development Log
 
+## [2026-05-10 15:47] - FEATURE
+
+### Changes
+- Added Prometheus metrics to the FastAPI gateway (wrapper) and exposed `GET /metrics`.
+- Added Prometheus scraping for the gateway (`job_name: api`) so Grafana can chart wrapper success/error rates.
+- Extended the vLLM Grafana dashboard with wrapper panels for inference success rate, error rate, and error-type breakdown.
+
+### Files Modified
+- `backend/requirements.txt`
+- `backend/app/main.py`
+- `backend/app/core/metrics.py`
+- `observability/prometheus/prometheus.yml`
+- `observability/grafana/dashboards/vllm_latency_throughput.json`
+- `README.md`
+
+### Rationale
+We need visibility into failures that occur in the gateway before a request reaches vLLM (auth, validation, wrong content-type, malformed JSON), and to distinguish those from upstream unavailability.
+
+### Breaking Changes
+None
+
+### Next Steps
+- Optionally add a Grafana variable for the wrapper `job` label (currently hardcoded to `job="api"` in the new panels).
+
 ## [2026-05-09 15:38] - BUGFIX
 
 ### Changes

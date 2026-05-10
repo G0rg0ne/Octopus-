@@ -9,11 +9,20 @@ import httpx
 import structlog
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.router import custom_router, health_router, openai_router
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.core.metrics import (
+    classify_error_type,
+    get_route_label,
+    is_inference_route,
+    wrapper_inference_error_total,
+    wrapper_inference_success_total,
+    wrapper_requests_total,
+)
 from app.core.security import require_api_key
 
 
@@ -40,6 +49,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         except Exception:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             structlog.get_logger().exception("request_failed", duration_ms=duration_ms)
+            # Best-effort metrics for unhandled exceptions.
+            route = get_route_label(request)
+            method = request.method
+            wrapper_requests_total.labels(route=route, method=method, status_code="500").inc()
+            if is_inference_route(route):
+                wrapper_inference_error_total.labels(
+                    route=route,
+                    method=method,
+                    status_code="500",
+                    error_type=classify_error_type(method, 500, route),
+                ).inc()
             structlog.contextvars.clear_contextvars()
             raise
 
@@ -61,6 +81,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "request",
             **event,
         )
+
+        route = get_route_label(request)
+        method = request.method
+        status_code = str(response.status_code)
+        wrapper_requests_total.labels(route=route, method=method, status_code=status_code).inc()
+        if is_inference_route(route):
+            if 200 <= response.status_code < 300:
+                wrapper_inference_success_total.labels(route=route, method=method).inc()
+            elif response.status_code >= 400:
+                wrapper_inference_error_total.labels(
+                    route=route,
+                    method=method,
+                    status_code=status_code,
+                    error_type=classify_error_type(method, response.status_code, route),
+                ).inc()
+
         structlog.contextvars.clear_contextvars()
         return response
 
@@ -74,6 +110,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(openai_router, dependencies=[Depends(require_api_key)])
     app.include_router(custom_router, dependencies=[Depends(require_api_key)])
+
+    @app.get("/metrics")
+    async def metrics() -> Response:
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.exception_handler(httpx.HTTPError)
     async def httpx_error_handler(_: Request, exc: httpx.HTTPError):

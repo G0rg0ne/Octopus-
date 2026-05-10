@@ -57,12 +57,18 @@ Notes:
 This repo includes an optional local observability stack:
 
 - **Prometheus** scrapes vLLM metrics from `http://vllm:8000/metrics` (Compose service `prometheus`).
+- **Prometheus** also scrapes gateway (FastAPI wrapper) metrics from `http://api:8080/metrics`.
 - **Grafana** is pre-provisioned with a vLLM dashboard JSON at `observability/grafana/dashboards/vllm_latency_throughput.json`.
 
 If a Grafana panel shows **No data**, double-check the metric name exists in `/metrics`. vLLM exports counters like:
 - `vllm:request_success_total`
 - `vllm:prompt_tokens_total`
 - `vllm:generation_tokens_total`
+
+The gateway exports wrapper metrics like:
+- `wrapper_inference_success_total` (inference endpoints only; HTTP 2xx)
+- `wrapper_inference_error_total` (inference endpoints only; HTTP >= 400; labeled by `error_type`)
+- `wrapper_requests_total` (all endpoints; labeled by `route`, `method`, `status_code`)
 
 ### Option B: Docker CLI
 
