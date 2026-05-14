@@ -1,321 +1,132 @@
-# vLLM Docker Serve + FastAPI Gateway (Qwen2.5-0.5B)
-
-This repo provides:
-- a **Dockerized vLLM OpenAI-compatible server** for a small model: **`Qwen/Qwen2.5-0.5B-Instruct`**, and
-- a **FastAPI gateway** that wraps vLLM with **API-key auth**, **request logging (structlog)**, **SSE streaming**, **input validation**, and a **`/health`** route.
-
-It focuses on:
-- Serving with `vllm serve`
-- Calling the OpenAI-compatible **`/v1/completions`** endpoint
-- Understanding startup phases: **engine init**, **weights loading**, **KV cache / GPU memory allocation**
-
-## Tech stack
-- **Docker Desktop** (Windows)
-- **NVIDIA GPU** + NVIDIA drivers + WSL2 integration
-- **vLLM OpenAI server image**: `vllm/vllm-openai` (base image)
-- **FastAPI** + **uvicorn**
-- **httpx** (async proxy)
-- **structlog** (JSON request logs)
+# vLLM Docker: Mistral Nemo Instruct (AWQ)
 
-## Project structure
-- `Dockerfile`: builds the serving image (runtime downloads model weights)
-- `docker-compose.yml`: optional Compose setup with GPU + persistent Hugging Face cache volume
-- `backend/`: FastAPI gateway service (sidecar container)
-- `scripts/run_vllm.ps1`: build + run (Windows PowerShell)
-- `scripts/run_vllm.sh`: build + run (bash)
-- `.env.example`: optional environment variables (no secrets)
+This repository runs a single **Docker Compose** service: the official **`vllm/vllm-openai`** image, serving **`casperhansen/mistral-nemo-instruct-2407-awq`** with **AWQ** quantization. The server exposes the **OpenAI-compatible HTTP API** on port **8000**.
 
-## Prerequisites (Windows + NVIDIA GPU)
-You need all of the following before the container can start successfully:
-- **Docker Desktop running** with the **Linux engine** enabled
-  - A quick check is `docker version` (should show both client + server).
-- **WSL2 enabled** and Docker Desktop WSL integration on.
-- **NVIDIA Container Toolkit support** in Docker Desktop (GPU pass-through works)
-  - Quick check once Docker is up: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`
+There is **no** FastAPI gateway, **no** Prometheus/Grafana stack, and **no** auxiliary scripts—only model serving.
 
-If `docker build` fails with a message about `dockerDesktopLinuxEngine` not found, start Docker Desktop and ensure the Linux engine context is healthy.
+## Technology stack
 
-## Build + run
+- **Docker** / **Docker Compose**
+- **NVIDIA GPU** + drivers + container toolkit (Linux engine; WSL2 on Windows)
+- **vLLM** OpenAI server image: `vllm/vllm-openai` (see root [`Dockerfile`](Dockerfile))
 
-### Option A: Docker Compose
+## Project layout
 
-```bash
-docker compose up --build
-```
+| Path | Purpose |
+|------|---------|
+| [`Dockerfile`](Dockerfile) | Image based on `vllm/vllm-openai`; HF cache env defaults |
+| [`docker-compose.yml`](docker-compose.yml) | GPU, volume, `vllm serve` arguments |
+| [`.env.example`](.env.example) | Documented optional environment variables (copy to `.env`) |
+| [`LICENSE`](LICENSE) | License |
 
-This brings up:
-- **Gateway**: `http://localhost:8080`
-- **vLLM (direct)**: `http://localhost:8000`
-- **Prometheus**: `http://localhost:9090`
-- **Grafana**: `http://localhost:3000` (default credentials: `admin` / `admin`)
+## Prerequisites (Windows + NVIDIA)
 
-Notes:
-- The vLLM image in this repo inherits an entrypoint of `vllm serve`, so Compose passes `command:` as `<model> ...` (do not prefix the command with `vllm` or `serve`).
+- **Docker Desktop** with the **Linux** engine
+- **WSL2** with Docker integration enabled
+- **NVIDIA Container Toolkit** / GPU support in Docker (e.g. `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`)
 
-## Observability (Prometheus + Grafana)
+If GPU pass-through fails, fix that before building; vLLM requires a CUDA-capable GPU.
 
-This repo includes an optional local observability stack:
+## Setup
 
-- **Prometheus** scrapes vLLM metrics from `http://vllm:8000/metrics` (Compose service `prometheus`).
-- **Prometheus** also scrapes gateway (FastAPI wrapper) metrics from `http://api:8080/metrics`.
-- **Grafana** is pre-provisioned with a vLLM dashboard JSON at `observability/grafana/dashboards/vllm_latency_throughput.json`.
+1. Copy environment template (optional but recommended):
 
-If a Grafana panel shows **No data**, double-check the metric name exists in `/metrics`. vLLM exports counters like:
-- `vllm:request_success_total`
-- `vllm:prompt_tokens_total`
-- `vllm:generation_tokens_total`
+   ```bash
+   cp .env.example .env
+   ```
 
-The gateway exports wrapper metrics like:
-- `wrapper_inference_success_total` (inference endpoints only; HTTP 2xx)
-- `wrapper_inference_error_total` (inference endpoints only; HTTP >= 400; labeled by `error_type`)
-- `wrapper_requests_total` (all endpoints; labeled by `route`, `method`, `status_code`)
+2. Edit `.env` if you need a Hugging Face token or different VRAM limits (see below). **If you already have a `.env` from an older setup**, remove or update `VLLM_MAX_MODEL_LEN`, `VLLM_GPU_MEMORY_UTILIZATION`, and `VLLM_MAX_NUM_SEQS`—otherwise those lines **override** the new Compose defaults and you can hit KV-cache or **“free memory … utilization”** errors again.
 
-### Option B: Docker CLI
+3. Build and start:
 
-```bash
-docker build -t octopus-vllm:qwen0.5b .
+   ```bash
+   docker compose up --build
+   ```
 
-docker run --rm -it --gpus all -p 8000:8000 \
-  -e HF_HOME=/data/hf \
-  -e HUGGINGFACE_HUB_CACHE=/data/hf/hub \
-  -e TRANSFORMERS_CACHE=/data/hf/transformers \
-  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  -v hf-cache:/data/hf \
-  octopus-vllm:qwen0.5b \
-  serve Qwen/Qwen2.5-0.5B-Instruct --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.55 --max-model-len 1024 --max-num-seqs 8
-```
+The API listens at **`http://localhost:8000`**.
 
-Notes:
-- The first run will download weights into the mounted cache volume `hf-cache` and will be slower.
-- You can override defaults via env vars (see `.env.example`).
-
-## API reference
-
-Two HTTP fronts:
-
-| Base URL | Role |
-|----------|------|
-| `http://localhost:8080` | **Gateway** (Compose): API-key auth on most routes, proxies to vLLM |
-| `http://localhost:8000` | **vLLM** directly: same OpenAI-compatible paths, no gateway auth |
-
-Replace hosts/ports if you run services differently.
-
-### Bash session setup
-
-All gateway examples below use these variables. Defaults match `docker compose` (`API_KEY` / `dev-key`). Change them if your gateway URL or API key differs.
-
-```bash
-export GATEWAY=http://localhost:8080
-export VLLM=http://localhost:8000
-export API_KEY=dev-key
-```
-
-Multi-line commands use **`\`** at the end of each line (bash / Git Bash / WSL). Each snippet is valid bash when pasted after the exports.
-
-### Gateway authentication
-
-Most gateway routes require:
-
-- Header: `X-API-Key: <key>` (must match `API_KEY`, default `dev-key` in Compose).
-
-Exceptions:
-
-- **`GET /health`** does not require a key unless you set `REQUIRE_API_KEY_ON_HEALTH=true`.
-
-OpenAI-compatible completion routes accept **`POST` only** (a **`GET`** returns **405**).
-
----
-
-### Gateway (`$GATEWAY`)
-
-Requires [session setup](#bash-session-setup). Uses `$API_KEY` for protected routes.
-
-#### `GET /health`
-
-Checks gateway availability and whether vLLM responds by requesting upstream `GET /v1/models`. Returns JSON with `status` and upstream latency. No API key unless `REQUIRE_API_KEY_ON_HEALTH=true`.
-
-```bash
-curl -s "${GATEWAY}/health"
-```
-
-#### `GET /v1/models`
-
-Lists models from vLLM (proxied JSON). Same shape as the OpenAI-compatible models listing.
-
-```bash
-curl -s \
-  -H "X-API-Key: ${API_KEY}" \
-  "${GATEWAY}/v1/models"
-```
-
-#### `POST /v1/completions`
-
-OpenAI-compatible **text completions**. Body must be **`Content-Type: application/json`**. Non-streaming: omit `stream` or set `"stream": false`; response is one JSON object when generation finishes.
-
-```bash
-curl -s -X POST "${GATEWAY}/v1/completions" \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Write a haiku about GPUs.\",\"max_tokens\":64,\"temperature\":0.7}"
-```
-
-Streaming: set `"stream": true`; gateway returns **SSE** (`text/event-stream`) passthrough from vLLM. Use `curl -N` so chunks arrive as they are generated.
-
-```bash
-curl -N -X POST "${GATEWAY}/v1/completions" \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64,\"temperature\":0.7,\"stream\":true}"
-```
-
-#### `POST /v1/chat/completions`
-
-OpenAI-compatible **chat** API (`messages` array). Proxied like completions; use `"stream": true` for SSE streaming.
-
-Non-streaming:
-
-```bash
-curl -s -X POST "${GATEWAY}/v1/chat/completions" \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"max_tokens\":64}"
-```
-
-Streaming:
-
-```bash
-curl -N -X POST "${GATEWAY}/v1/chat/completions" \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Count to three slowly.\"}],\"max_tokens\":64,\"stream\":true}"
-```
-
-#### `POST /api/v1/generate`
-
-Gateway-native endpoint: **validated** request body (Pydantic), calls upstream completions **non-streaming**, returns a **normalized** JSON body (`text`, `finish_reason`, `usage`, etc.) instead of raw OpenAI shapes.
-
-```bash
-curl -s -X POST "${GATEWAY}/api/v1/generate" \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Say hello.\",\"max_tokens\":32}"
-```
-
-#### `POST /api/v1/stream`
-
-Same validated input as `/api/v1/generate`, but streams **normalized SSE**: `event: token` lines with JSON `{"text":"..."}`, then `event: done`. Easier to consume than raw OpenAI SSE if you only need incremental text.
-
-```bash
-curl -N -X POST "${GATEWAY}/api/v1/stream" \
-  -H "X-API-Key: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64}"
-```
-
----
-
-### Direct vLLM (`$VLLM`)
-
-Requires [session setup](#bash-session-setup) for `$VLLM` (no API key on these routes). Same OpenAI-style paths as upstream vLLM.
-
-#### `GET /v1/models`
-
-```bash
-curl -s "${VLLM}/v1/models"
-```
-
-#### `POST /v1/completions`
-
-Non-streaming:
-
-```bash
-curl -s -X POST "${VLLM}/v1/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Write a haiku about GPUs.\",\"max_tokens\":64,\"temperature\":0.7}"
-```
-
-Streaming (`stream: true`, OpenAI SSE):
-
-```bash
-curl -N -X POST "${VLLM}/v1/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Stream tokens.\",\"max_tokens\":64,\"temperature\":0.7,\"stream\":true}"
-```
-
-#### `POST /v1/chat/completions`
-
-Available when your vLLM build exposes chat completions.
-
-Non-streaming:
-
-```bash
-curl -s -X POST "${VLLM}/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"max_tokens\":64}"
-```
-
-Streaming:
-
-```bash
-curl -N -X POST "${VLLM}/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"Count to three slowly.\"}],\"max_tokens\":64,\"stream\":true}"
-```
-
-You can use the official OpenAI Python client with `base_url` set to `http://localhost:8000/v1` (direct) or `http://localhost:8080/v1` (gateway; add default header `X-API-Key`).
-
-## Concepts (what you’ll see in logs)
-
-### Engine startup
-When `vllm serve` starts, it initializes:
-- the HTTP server (OpenAI-compatible routes like `/v1/completions`), and
-- the vLLM engine/scheduler + CUDA runtime context(s).
-
-### Model weights loading
-On the **first startup**, Hugging Face files are downloaded into the cache directory (mounted volume). Then the model weights are loaded and prepared for inference. Subsequent starts reuse the cache and are typically much faster.
-
-### GPU memory allocation (KV cache)
-vLLM uses GPU memory for:
-- **model weights**
-- **temporary buffers/activations** (peak during prompt “prefill”)
-- **KV cache** (dominates for long contexts and/or high concurrency)
-
-Key knobs (wired in `Dockerfile` and overridable via env vars):
-- `--gpu-memory-utilization`: fraction of GPU memory available for vLLM-managed allocations; vLLM derives KV cache size from this unless you set a fixed KV cache size.
-- `--max-model-len`: upper bound on context length; longer contexts require more KV cache.
-- `--max-num-seqs`: upper bound on concurrent sequences; higher concurrency increases KV cache demand.
-
-If you see OOM errors, reduce `VLLM_GPU_MEMORY_UTILIZATION`, `VLLM_MAX_MODEL_LEN`, and/or `VLLM_MAX_NUM_SEQS`.
+The image entrypoint is `vllm serve`; Compose `command:` supplies the model id and flags (do **not** prefix with `vllm` or `serve`).
 
 ## Environment variables
-- `HF_TOKEN` (optional): only required for gated Hugging Face models.
-- vLLM serving knobs (Compose defaults are in `.env.example`):
-  - `VLLM_GPU_MEMORY_UTILIZATION`
-  - `VLLM_MAX_MODEL_LEN`
-  - `VLLM_MAX_NUM_SEQS`
-  - `PYTORCH_CUDA_ALLOC_CONF` (recommended: `expandable_segments:True`)
-- You can also override serving parameters by editing the `docker run` arguments or the `docker-compose.yml` `command:`.
 
-## Testing / verification checklist
+Documented in [`.env.example`](.env.example). Common knobs:
 
-After `docker compose up --build`, in bash:
+| Variable | Role |
+|----------|------|
+| `HF_TOKEN` | Optional; set if Hub access requires authentication |
+| `VLLM_MODEL` | Hugging Face model id (default: `casperhansen/mistral-nemo-instruct-2407-awq`) |
+| `VLLM_QUANTIZATION` | Must stay compatible with the checkpoint (default: `awq`) |
+| `VLLM_GPU_MEMORY_UTILIZATION` | Fraction of **total** VRAM vLLM targets at startup; must leave headroom for **non-CUDA** use (display, compositor). Default **`0.88`** on Compose; **lower** (e.g. `0.85`) if you see the “Free memory … less than desired GPU memory utilization” error. |
+| `VLLM_MAX_MODEL_LEN` | **Context cap** for KV cache sizing. Default **`4096`**, aimed at **~12 GiB** cards (e.g. RTX 4070 Ti). **Lower** (e.g. `512`–`2048`) on **~8 GiB** or if Docker/WSL shows less usable VRAM; **raise** toward `8192` when logs show plenty of KV headroom. |
+| `VLLM_MAX_NUM_SEQS` | Max concurrent sequences (default `4`; lower reduces KV pressure). |
+| `VLLM_TENSOR_PARALLEL_SIZE` | Tensor parallel degree across GPUs (default `1`) |
+| `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` | Set `0` (default in Compose) to avoid extra reservation for CUDA graph profiling on small GPUs. |
+| `PYTORCH_CUDA_ALLOC_CONF` | PyTorch allocator hint (default `expandable_segments:True`) |
+
+If you previously used a **smaller** model in `.env`, update `VLLM_MODEL` (and possibly `VLLM_MAX_MODEL_LEN`) so you do not accidentally keep serving the old checkpoint.
+
+## Troubleshooting: KV cache / `max_model_len`
+
+If the engine exits with an error like **“KV cache is needed … which is larger than the available KV cache memory”** (or suggests decreasing **`max_model_len`**), your **weights + CUDA graphs** already consume most of the GPU; the configured **`max_model_len`** requires more KV space than is left.
+
+1. **Lower `VLLM_MAX_MODEL_LEN`** in `.env` (the logs often include an **estimated maximum model length** for your card; stay at or below that, or step down from the default `4096` if needed).
+2. Keep **`VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0`** (Compose default) unless you need the profiler; vLLM notes this improves effective KV space on recent versions.
+
+## Troubleshooting: “Free memory … less than desired GPU memory utilization”
+
+vLLM checks that **free** VRAM at engine start is at least **`--gpu-memory-utilization` × total VRAM**. A **desktop GPU** with a display attached often has **~1 GiB** (or more) already reserved, so a high utilization like **`0.92`** can fail even on a **12 GiB** card.
+
+1. **Lower `VLLM_GPU_MEMORY_UTILIZATION`** in `.env` (try **`0.88`** as in the repo default, then **`0.85`** if needed).
+2. Close other GPU-heavy apps; on Linux/WSL, reducing compositor or multi-monitor use can reclaim a little VRAM.
+3. Only **after** a clean start with headroom, consider **raising** utilization slightly if you need more KV cache—never above what the error message allows.
+
+On **16 GiB+** GPUs you can usually increase **`VLLM_MAX_MODEL_LEN`** (and optionally **`VLLM_MAX_NUM_SEQS`**) after a successful boot.
+
+### Example: RTX 4070 Ti (12 GiB)
+
+With **~12 GiB** total VRAM and this AWQ checkpoint (~8 GiB weights plus graphs/overhead), starting near **`VLLM_MAX_MODEL_LEN=4096`**, **`VLLM_MAX_NUM_SEQS=4`**, and **`VLLM_GPU_MEMORY_UTILIZATION=0.88`** matches the repo defaults ( **`0.88`** leaves room for display-reserved memory). If startup is stable and `nvidia-smi` shows free memory during idle load, you can try **`8192`** context or cautiously **higher** utilization; if vLLM still estimates very small KV space (e.g. in WSL), reduce **`VLLM_MAX_MODEL_LEN`** or **`VLLM_MAX_NUM_SEQS`** per the error message.
+
+### Note: “Port 8000 is already in use, trying port 8001”
+
+You may see the engine worker pick another port for **internal** distributed setup while the **HTTP** API stays on **8000** as configured. That line alone is not necessarily a host port conflict.
+
+## API (OpenAI-compatible)
+
+vLLM exposes routes such as:
+
+- `GET /health` — liveness
+- `GET /v1/models` — loaded models
+- `POST /v1/chat/completions` — chat completions
+- `POST /v1/completions` — text completions
+- `GET /metrics` — Prometheus metrics (optional client scrape)
+
+There is **no** API-key middleware in this repo. Add a reverse proxy or API gateway in front if you need authentication.
+
+### Example: chat completion
 
 ```bash
-export GATEWAY=http://localhost:8080 VLLM=http://localhost:8000 API_KEY=dev-key
+curl -s http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{\"model\": \"casperhansen/mistral-nemo-instruct-2407-awq\", \"messages\": [{\"role\": \"user\", \"content\": \"Say hello in one sentence.\"}], \"max_tokens\": 64}"
 ```
 
-1. `docker version` shows a working server.
-2. Compose (or Docker CLI) has started vLLM and the gateway.
-3. `curl -s "${VLLM}/v1/models"` returns JSON.
-4. `curl -s -X POST "${VLLM}/v1/completions" -H "Content-Type: application/json" -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"prompt\":\"Hi\",\"max_tokens\":8}"` returns a completion.
-5. `curl -s "${GATEWAY}/health"` returns `"status":"ok"` when vLLM is ready.
-6. `curl -s -H "X-API-Key: ${API_KEY}" "${GATEWAY}/v1/models"` returns JSON.
+Use the same `model` string as returned by `GET /v1/models` if it differs slightly from the Hub id.
+
+## Persistent weights cache
+
+Compose mounts a named volume **`hf-cache`** at `/data/hf` inside the container so repeated starts reuse downloaded weights.
+
+## Testing
+
+- After `docker compose up`, run `curl http://localhost:8000/health` (expect HTTP 200 when ready).
+- Run the `curl` example above for an end-to-end generation check.
 
 ## Deployment notes
-- For production, pin the base image tag instead of `latest`, and consider configuring:
-  - restart policies
-  - request limits (`--max-model-len`, `--max-num-seqs`)
-  - auth (reverse proxy in front of the OpenAI-compatible server, or use the gateway)
+
+- Pin a specific **`vllm/vllm-openai:<tag>`** in [`Dockerfile`](Dockerfile) instead of `latest` for reproducible production builds.
+- Tune `VLLM_MAX_MODEL_LEN` and concurrency for your GPU VRAM; Mistral Nemo AWQ is large and **defaults are conservative** so a first boot succeeds on small GPUs.
+- For multi-GPU, increase `VLLM_TENSOR_PARALLEL_SIZE` to match your topology.
 
 ## Recent changes
-See `DEVELOPMENT.md`.
+
+See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the changelog.

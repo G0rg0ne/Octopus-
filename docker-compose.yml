@@ -2,35 +2,36 @@ services:
   vllm:
     build:
       context: .
-    image: octopus-vllm:qwen0.5b
+    image: octopus-vllm:mistral-nemo-awq
     ports:
       - "8000:8000"
     command:
-      - "${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+      - "${VLLM_MODEL:-casperhansen/mistral-nemo-instruct-2407-awq}"
       - --host
       - "0.0.0.0"
       - --port
       - "8000"
+      - --quantization
+      - "${VLLM_QUANTIZATION:-awq}"
       - --gpu-memory-utilization
-      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.6}"
+      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.88}"
       - --max-model-len
-      - "${VLLM_MAX_MODEL_LEN:-2048}"
+      - "${VLLM_MAX_MODEL_LEN:-4096}"
       - --max-num-seqs
-      - "${VLLM_MAX_NUM_SEQS:-8}"
+      - "${VLLM_MAX_NUM_SEQS:-4}"
       - --tensor-parallel-size
       - "${VLLM_TENSOR_PARALLEL_SIZE:-1}"
-      - --kv-cache-metrics
-      - --kv-cache-metrics-sample
-      - "${VLLM_KV_CACHE_METRICS_SAMPLE:-0.7}"
     environment:
-      HF_TOKEN: "${HF_TOKEN}"
+      # Frees reserved memory used for CUDA graph profiling (vLLM 0.21+); helps tight VRAM.
+      VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-0}"
+      HF_TOKEN: "${HF_TOKEN:-}"
       HF_HOME: /data/hf
       HUGGINGFACE_HUB_CACHE: /data/hf/hub
       TRANSFORMERS_CACHE: /data/hf/transformers
-      # Helps reduce CUDA allocator fragmentation (common on long-running servers).
       PYTORCH_CUDA_ALLOC_CONF: "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - hf-cache:/data/hf
     deploy:
@@ -41,46 +42,5 @@ services:
               count: all
               capabilities: [gpu]
 
-  api:
-    build:
-      context: ./backend
-    image: octopus-api-gateway:dev
-    depends_on:
-      - vllm
-    ports:
-      - "8080:8080"
-    environment:
-      VLLM_BASE_URL: "http://vllm:8000"
-      API_KEY: "${API_KEY:-dev-key}"
-      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
-    env_file:
-      - .env
-
-  prometheus:
-    image: prom/prometheus:latest
-    depends_on:
-      - vllm
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-
-  grafana:
-    image: grafana/grafana:latest
-    depends_on:
-      - prometheus
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
-
 volumes:
   hf-cache:
-  grafana-data:
